@@ -1,45 +1,35 @@
 from airflow import DAG
-from airflow.providers.amazon.aws.hooks.s3 import S3Hook
-from airflow.operators.python import PythonOperator
+from airflow.operators.bash import BashOperator
 from datetime import datetime
-import subprocess
 
-# Connexion S3 (MinIO)
-MINIO_CONN_ID = 'minio_conn'
-BRONZE_BUCKET = 'bronze'
-SILVER_BUCKET = 'silver'
+default_args = {
+    'owner': 'airflow',
+    'start_date': datetime(2024, 1, 1),
+    'retries': 1
+}
 
-def read_from_bronze():
-    s3 = S3Hook(aws_conn_id=MINIO_CONN_ID)
-    files = s3.list_keys(bucket_name=BRONZE_BUCKET)
-    print(f"Fichiers dans bronze: {files}")
+with DAG(
+    dag_id='medaillon_dag',
+    default_args=default_args,
+    description='Pipeline medaillon Spark -> MinIO',
+    schedule_interval=None,
+    catchup=False,
+    tags=['spark', 'minio', 'medaillon']
+) as dag:
 
-def run_spark_job():
-    # Exemple basique: appelle un script spark-submit dans spark/jobs/
-    # Adapte le chemin si besoin
-    cmd = [
-        "/opt/spark/bin/spark-submit",
-        "/opt/spark/jobs/transform.py"
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    print(result.stdout)
-    if result.returncode != 0:
-        raise Exception(f"Spark job failed: {result.stderr}")
-
-def write_to_silver():
-    s3 = S3Hook(aws_conn_id=MINIO_CONN_ID)
-    # Ici tu écris un fichier (exemple simple)
-    s3.load_string(
-        string_data="Données transformées",
-        key="output/result.txt",
-        bucket_name=SILVER_BUCKET,
-        replace=True
+    clean_contracts = BashOperator(
+        task_id='clean_contracts_job',
+        bash_command='spark-submit /opt/spark/jobs/clean_contracts_job.py'
     )
-    print("Fichier écrit dans silver")
 
-with DAG(dag_id="medaillon_etl", start_date=datetime(2025,6,1), schedule_interval="@daily", catchup=False) as dag:
-    t1 = PythonOperator(task_id="list_bronze_files", python_callable=read_from_bronze)
-    t2 = PythonOperator(task_id="spark_transform", python_callable=run_spark_job)
-    t3 = PythonOperator(task_id="write_silver", python_callable=write_to_silver)
+    clean_etabs = BashOperator(
+        task_id='clean_etablissement_job',
+        bash_command='spark-submit /opt/spark/jobs/clean_etablissement_job.py'
+    )
 
-    t1 >> t2 >> t3
+    join_gold = BashOperator(
+        task_id='join_public_contracts_job',
+        bash_command='spark-submit /opt/spark/jobs/join_public_contracts_job.py'
+    )
+
+    [clean_contracts, clean_etabs] >> join_gold
