@@ -10,7 +10,11 @@ spark = SparkSession.builder \
     .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
     .getOrCreate()
 
-df_etab = spark.read.option("header", True).csv("s3a://bronze/sources/simulated_etablissements_50000.csv")
+#df_etab = spark.read.option("header", True).csv("s3a://bronze/sources/simulated_etablissements_50000.csv")
+
+df_etab = spark.read.option("header", True).option("delimiter", ",") \
+        .csv("s3a://bronze/sources/simulated_etablissements_50000.csv")
+
 
 df_etab_actifs = df_etab.filter(col("etatAdministratifEtablissement") == "A")
 
